@@ -78,7 +78,7 @@ class DmsStorage:
             CREATE TABLE IF NOT EXISTS requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 vk_user_id INTEGER NOT NULL,
-                patient_id INTEGER NOT NULL,
+                patient_id INTEGER,
                 service_id INTEGER,
                 clinic_id INTEGER,
                 request_type TEXT NOT NULL,
@@ -98,6 +98,7 @@ class DmsStorage:
         self.connection.commit()
         self._ensure_clinic_services_id()
         self._ensure_column("requests", "patient_instruction", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_requests_patient_nullable()
 
     def _ensure_clinic_services_id(self):
         columns = self.connection.execute("PRAGMA table_info(clinic_services)").fetchall()
@@ -127,6 +128,48 @@ class DmsStorage:
         if any(column["name"] == column_name for column in columns):
             return
         self.connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+        self.connection.commit()
+
+    def _ensure_requests_patient_nullable(self):
+        columns = self.connection.execute("PRAGMA table_info(requests)").fetchall()
+        patient_column = next((column for column in columns if column["name"] == "patient_id"), None)
+        if not patient_column or patient_column["notnull"] == 0:
+            return
+
+        self.connection.executescript(
+            """
+            CREATE TABLE requests_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vk_user_id INTEGER NOT NULL,
+                patient_id INTEGER,
+                service_id INTEGER,
+                clinic_id INTEGER,
+                request_type TEXT NOT NULL,
+                contact TEXT NOT NULL,
+                preferred_time TEXT NOT NULL,
+                comment TEXT NOT NULL,
+                status TEXT NOT NULL,
+                patient_instruction TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (patient_id) REFERENCES patients(id),
+                FOREIGN KEY (service_id) REFERENCES services(id),
+                FOREIGN KEY (clinic_id) REFERENCES clinics(id)
+            );
+            INSERT INTO requests_new (
+                id, vk_user_id, patient_id, service_id, clinic_id, request_type,
+                contact, preferred_time, comment, status, patient_instruction, created_at, updated_at
+            )
+            SELECT
+                id, vk_user_id, patient_id, service_id, clinic_id, request_type,
+                contact, preferred_time, comment, status,
+                COALESCE(patient_instruction, ''),
+                created_at, updated_at
+            FROM requests;
+            DROP TABLE requests;
+            ALTER TABLE requests_new RENAME TO requests;
+            """
+        )
         self.connection.commit()
 
     def _seed_demo_data(self):
@@ -248,7 +291,7 @@ class DmsStorage:
     def create_request(
         self,
         vk_user_id: int,
-        patient_id: int,
+        patient_id: int | None,
         request_type: str,
         contact: str,
         preferred_time: str,

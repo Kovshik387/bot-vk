@@ -68,11 +68,23 @@ class DmsVkBot:
             self.process_auth(user_id, text, session)
             return
 
+        if normalized == "администратор" or session.state.startswith("admin_"):
+            if session.state.startswith("admin_"):
+                self.process_admin_flow(user_id, text, session, patient)
+            else:
+                self.start_admin_request(user_id, patient)
+            return
+
+        if normalized == "статус заявки":
+            self.send_request_status(user_id, patient)
+            return
+
         if not patient:
             self.send_message(
                 user_id,
                 "Здравствуйте. Я бот страховой компании для навигации пациентов по ДМС.\n\n"
-                "Перед показом клиник и услуг нужно проверить, что ваш полис действует.",
+                "Перед показом клиник и услуг нужно проверить, что ваш полис действует. "
+                "Если данные не проходят проверку или полис просрочен, отправьте обращение администратору.",
                 start_keyboard(),
             )
             return
@@ -87,14 +99,8 @@ class DmsVkBot:
             self.start_service_flow(user_id, "lab")
         elif normalized == "согласование услуги":
             self.start_service_flow(user_id, "approval")
-        elif normalized == "статус заявки":
-            self.send_request_status(user_id)
-        elif normalized == "администратор":
-            self.start_admin_request(user_id)
         elif session.state.startswith("service_"):
             self.process_service_flow(user_id, text, session, patient)
-        elif session.state.startswith("admin_"):
-            self.process_admin_flow(user_id, text, session, patient)
         else:
             self.send_message(user_id, "Выберите действие на клавиатуре.", main_keyboard())
 
@@ -304,11 +310,21 @@ class DmsVkBot:
                 main_keyboard(),
             )
 
-    def start_admin_request(self, user_id: int):
-        self.sessions[user_id] = Session(state="admin_question")
-        self.send_message(user_id, "Опишите вопрос для администратора страховой компании.", back_keyboard())
+    def start_admin_request(self, user_id: int, patient: Patient | None = None):
+        self.sessions[user_id] = Session(
+            state="admin_question",
+            data={"patient_id": patient.id if patient else None, "patient_name": patient.full_name if patient else "Не идентифицирован"},
+        )
+        if patient:
+            prompt = "Опишите вопрос для администратора страховой компании."
+        else:
+            prompt = (
+                "Опишите вопрос для администратора страховой компании. Например: пациент не найден в системе ДМС, "
+                "полис просрочен или данные указаны верно, но проверка не проходит."
+            )
+        self.send_message(user_id, prompt, back_keyboard())
 
-    def process_admin_flow(self, user_id: int, text: str, session: Session, patient: Patient):
+    def process_admin_flow(self, user_id: int, text: str, session: Session, patient: Patient | None):
         if session.state == "admin_question":
             session.data["question"] = text.strip()
             session.state = "admin_contact"
@@ -318,7 +334,7 @@ class DmsVkBot:
         if session.state == "admin_contact":
             request_id = self.storage.create_request(
                 vk_user_id=user_id,
-                patient_id=patient.id,
+                patient_id=patient.id if patient else session.data.get("patient_id"),
                 request_type="Обращение к администратору",
                 contact=text.strip(),
                 preferred_time="Не указано",
@@ -328,12 +344,14 @@ class DmsVkBot:
             )
             self.notify_admins(
                 f"Обращение к администратору #{request_id}\n"
-                f"Пациент: {patient.full_name}\n"
+                f"Пациент: {patient.full_name if patient else session.data.get('patient_name', 'Не идентифицирован')}\n"
+                f"VK ID: {user_id}\n"
                 f"Вопрос: {session.data['question']}\n"
                 f"Контакт: {text.strip()}"
             )
             self.sessions[user_id] = Session()
-            self.send_message(user_id, f"Обращение #{request_id} передано администратору.", main_keyboard())
+            keyboard = main_keyboard() if patient else start_keyboard()
+            self.send_message(user_id, f"Обращение #{request_id} передано администратору.", keyboard)
 
     def create_admin_request(self, user_id: int, patient: Patient, comment: str):
         request_id = self.storage.create_request(
@@ -348,10 +366,10 @@ class DmsVkBot:
         )
         self.notify_admins(f"Автоматическое обращение #{request_id}\nПациент: {patient.full_name}\n{comment}")
 
-    def send_request_status(self, user_id: int):
+    def send_request_status(self, user_id: int, patient: Patient | None = None):
         requests = self.storage.list_user_requests(user_id)
         if not requests:
-            self.send_message(user_id, "У вас пока нет заявок.", main_keyboard())
+            self.send_message(user_id, "У вас пока нет заявок.", main_keyboard() if patient else start_keyboard())
             return
         lines = ["Последние заявки:"]
         for item in requests:
@@ -362,7 +380,7 @@ class DmsVkBot:
                 f"\n#{item['id']} - {service}\nКлиника: {clinic}\nСтатус: {item['status']}\n"
                 f"Инструкция: {instruction}\nСоздана: {item['created_at']}"
             )
-        self.send_message(user_id, "\n".join(lines), main_keyboard())
+        self.send_message(user_id, "\n".join(lines), main_keyboard() if patient else start_keyboard())
 
     @staticmethod
     def build_patient_instruction(status: str, clinic_name: str, access_type: str) -> str:

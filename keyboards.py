@@ -14,6 +14,7 @@ def _button_rows(rows):
 def start_keyboard():
     return _button_rows([
         [("Начать проверку ДМС", VkKeyboardColor.PRIMARY)],
+        [("Администратор", VkKeyboardColor.NEGATIVE), ("Статус заявки", VkKeyboardColor.SECONDARY)],
         [("Помощь", VkKeyboardColor.SECONDARY)],
     ])
 

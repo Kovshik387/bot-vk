@@ -83,7 +83,7 @@ class ClinicService(models.Model):
 
 class UserLink(models.Model):
     vk_user_id = models.IntegerField("VK ID", primary_key=True)
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, verbose_name="Пациент")
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, null=True, blank=True, verbose_name="Пациент")
     linked_at = models.CharField("Дата привязки", max_length=32)
 
     class Meta:
