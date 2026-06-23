@@ -34,3 +34,24 @@ def test_patient_lookup_and_request_creation(tmp_path):
     )
     assert request_id == 1
     assert storage.list_user_requests(100500)[0]["status"] == "Передано в медицинскую организацию"
+
+
+def test_admin_request_without_verified_patient(tmp_path):
+    storage = DmsStorage(str(tmp_path / "test.db"))
+    storage.initialize()
+
+    request_id = storage.create_request(
+        vk_user_id=200600,
+        patient_id=None,
+        request_type="Обращение к администратору",
+        contact="+7 900 000-00-00",
+        preferred_time="Не указано",
+        comment="Пациент не найден в системе ДМС",
+        status="Передано администратору",
+        patient_instruction="Ожидайте ответа администратора страховой компании.",
+    )
+
+    request = storage.list_user_requests(200600)[0]
+    assert request_id == 1
+    assert request["patient_id"] is None
+    assert request["status"] == "Передано администратору"
